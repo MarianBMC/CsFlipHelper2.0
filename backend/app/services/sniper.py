@@ -1,6 +1,7 @@
 import asyncio
+from datetime import datetime, timezone
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 from app.core.memory_db import MemoryDB
 from app.services.csfloat import CSFloatScraper
@@ -14,14 +15,52 @@ class SniperService:
     ITEM_SCAN_DELAY_SECONDS: float = 1.5
     ERROR_RECOVERY_DELAY_SECONDS: float = 5.0
     MAX_SEEN_CACHE_SIZE: int = 1000
+    MAX_DEALS_HISTORY: int = 50
     CSFLOAT_SELLING_FEE_RATE: float = 0.02
     DEFAULT_MARKUP_MULTIPLIER: float = 1.15
     MIN_NET_PROFIT_MARGIN: float = 0.0
+
+    _instance: ClassVar["SniperService | None"] = None
 
     def __init__(self, scraper: CSFloatScraper, memory_db: MemoryDB) -> None:
         self.scraper = scraper
         self.memory_db = memory_db
         self._seen_listing_ids: set[str] = set()
+        self.detected_deals: list[dict[str, Any]] = []
+        SniperService._instance = self
+
+    @classmethod
+    def get_instance(cls) -> "SniperService | None":
+        """Return the active SniperService instance if initialized."""
+        return cls._instance
+
+    @property
+    def deals(self) -> list[dict[str, Any]]:
+        """Alias for the in-memory list of detected deals (newest first)."""
+        return self.detected_deals
+
+    def get_deals(self) -> list[dict[str, Any]]:
+        """Return a shallow copy of the detected deals list (newest first, max 50)."""
+        return list(self.detected_deals)
+
+    def record_deal(self, deal: dict[str, Any]) -> dict[str, Any]:
+        """Store a valid deal at the front of the in-memory list and cap at MAX_DEALS_HISTORY (50)."""
+        deal_entry: dict[str, Any] = {
+            "listing_id": str(deal.get("listing_id", "")),
+            "market_hash_name": str(deal.get("market_hash_name", "Unknown Item")),
+            "price": float(deal["price"]),
+            "max_buy_price": float(deal["max_buy_price"]),
+            "net_profit": float(deal["net_profit"]),
+            "float_value": deal.get("float_value"),
+            "buy_url": str(deal.get("buy_url", "")),
+            "detected_at": str(
+                deal.get("detected_at") or datetime.now(timezone.utc).isoformat()
+            ),
+        }
+        self.detected_deals.insert(0, deal_entry)
+        if len(self.detected_deals) > self.MAX_DEALS_HISTORY:
+            del self.detected_deals[self.MAX_DEALS_HISTORY :]
+        return deal_entry
 
     def _record_seen_listing(self, listing_id: str) -> None:
         """Record an alerted listing ID and prune cache in-memory if it exceeds capacity."""
@@ -179,15 +218,17 @@ class SniperService:
         buy_url = f"https://csfloat.com/item/{raw_listing_id}"
 
         return {
+            "listing_id": listing_id,
             "market_hash_name": str(market_hash_name),
-            "float_value": float_value,
             "price": price_dollars,
+            "max_buy_price": target_max_price,
             "reference_price": resolved_ref_price,
             "net_profit": net_profit,
             "net_profit_margin_pct": net_profit_margin_pct,
-            "listing_id": listing_id,
+            "float_value": float_value,
             "buy_url": buy_url,
             "url": buy_url,
+            "detected_at": datetime.now(timezone.utc).isoformat(),
         }
 
     async def run_sniper_loop(self) -> None:
@@ -220,6 +261,9 @@ class SniperService:
                                 deal["market_hash_name"] = market_hash_name
 
                             max_buy_display, _, _, _ = self._resolve_target_params(target_config)
+                            deal["max_buy_price"] = max_buy_display
+                            self.record_deal(deal)
+
                             logger.critical(
                                 "DEAL FOUND! [%s] for $[%.2f] (Max: $%.2f | Ref: $%.2f | Net Profit: +$%.2f [%.2f%%] | Float: %s | URL: %s)",
                                 deal["market_hash_name"],

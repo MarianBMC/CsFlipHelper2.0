@@ -7,6 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router as api_v1_router
 from app.core.memory_db import MemoryDB
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sniper = SniperService(scraper=scraper, memory_db=memory_db)
 
     sniper_task = asyncio.create_task(sniper.run_sniper_loop())
+    app.state.sniper = sniper
     app.state.sniper_task = sniper_task
     logger.info("Application startup complete. Sniper background loop running.")
 
@@ -60,6 +62,14 @@ app = FastAPI(
     version="0.1.0",
     description="Backend API for tracking CS2 skin prices and arbitrage opportunities.",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(api_v1_router)
