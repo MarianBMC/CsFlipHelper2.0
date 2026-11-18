@@ -17,4 +17,4 @@ async def get_status(
 ) -> HealthStatusResponse:
     """Return service health status and number of loaded arbitrage items."""
     items = await db.get_target_items()
-    return HealthStatusResponse(status="ok", items_loaded=len(items))
+    return HealthStatusResponse(status="running", items_loaded=len(items))

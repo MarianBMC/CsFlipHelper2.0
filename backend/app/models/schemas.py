@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 class HealthStatusResponse(BaseModel):
     """Schema for the health-check status response."""
 
-    status: str = Field(..., examples=["ok"], description="Service operational status.")
+    status: str = Field(..., examples=["running"], description="Service operational status.")
     items_loaded: int = Field(
         ...,
         ge=0,
