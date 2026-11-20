@@ -68,6 +68,16 @@ class SniperService:
             self._seen_listing_ids.clear()
         self._seen_listing_ids.add(listing_id)
 
+    @staticmethod
+    def _safe_float(value: Any, default: float | None = None) -> float | None:
+        """Safely convert a value to float, returning default if None or invalid."""
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+
     def _resolve_target_params(
         self,
         target: float | dict[str, Any],
@@ -77,22 +87,30 @@ class SniperService:
     ) -> tuple[float, float | None, float | None, float | None]:
         """Extract max_buy_price, min_float, max_float, and reference_price from target config."""
         if isinstance(target, dict):
-            raw_max_buy = target.get("max_buy_price", 0.0)
-            max_buy_price = float(raw_max_buy) if raw_max_buy is not None else 0.0
+            max_buy_price = self._safe_float(target.get("max_buy_price"), default=0.0) or 0.0
             raw_min_f = min_float_override if min_float_override is not None else target.get("min_float")
             raw_max_f = max_float_override if max_float_override is not None else target.get("max_float")
             raw_ref = (
                 reference_price_override
                 if reference_price_override is not None
-                else (target.get("reference_price") or target.get("estimated_resale_price"))
+                else (
+                    target.get("reference_price")
+                    if target.get("reference_price") is not None
+                    else target.get("estimated_resale_price")
+                )
             )
-            min_float = float(raw_min_f) if raw_min_f is not None else None
-            max_float = float(raw_max_f) if raw_max_f is not None else None
-            ref_price = float(raw_ref) if raw_ref is not None else None
+            min_float = self._safe_float(raw_min_f)
+            max_float = self._safe_float(raw_max_f)
+            ref_price = self._safe_float(raw_ref)
             return max_buy_price, min_float, max_float, ref_price
 
-        max_buy_price = float(target)
-        return max_buy_price, min_float_override, max_float_override, reference_price_override
+        max_buy_price = self._safe_float(target, default=0.0) or 0.0
+        return (
+            max_buy_price,
+            self._safe_float(min_float_override),
+            self._safe_float(max_float_override),
+            self._safe_float(reference_price_override),
+        )
 
     def _extract_reference_price(
         self,
@@ -101,7 +119,7 @@ class SniperService:
         explicit_reference_price: float | None,
     ) -> float:
         """Resolve reference resale price in USD from config, CSFloat listing metadata, or fallback estimate."""
-        if explicit_reference_price is not None and explicit_reference_price > 0:
+        if explicit_reference_price is not None:
             return explicit_reference_price
 
         ref_data = listing.get("reference")

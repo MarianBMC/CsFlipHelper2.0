@@ -19,6 +19,8 @@ class TargetItemResponse(BaseModel):
 
     market_hash_name: str = Field(..., description="CS2 item market hash name.")
     max_buy_price: float = Field(..., description="Maximum buy price threshold in USD.")
+    max_float: float | None = Field(default=None, description="Maximum allowed float value threshold.")
+    reference_price: float | None = Field(default=None, description="Reference resale price in USD.")
 
 
 class HealthStatusResponse(BaseModel):

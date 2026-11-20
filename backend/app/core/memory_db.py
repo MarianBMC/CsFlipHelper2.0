@@ -28,11 +28,21 @@ class MemoryDB:
     def __init__(self) -> None:
         if self._initialized:
             return
-        self._target_items: dict[str, float] = {}
+        self._target_items: dict[str, dict[str, float | None]] = {}
         self._lock: asyncio.Lock = asyncio.Lock()
         self._client: Client | None = None
         self._initialized = True
         logger.debug("MemoryDB singleton instance initialized.")
+
+    @staticmethod
+    def _safe_float(value: Any) -> float | None:
+        """Safely convert a database value to float, returning None if NULL or invalid."""
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
 
     def _get_supabase_client(self) -> Client:
         """Initialize and return the synchronous Supabase client."""
@@ -51,7 +61,7 @@ class MemoryDB:
         client = self._get_supabase_client()
         response = (
             client.table("target_items")
-            .select("market_hash_name, max_buy_price")
+            .select("market_hash_name,max_buy_price,max_float,reference_price")
             .eq("is_active", True)
             .execute()
         )
@@ -63,12 +73,18 @@ class MemoryDB:
             logger.info("Loading target items and reference prices from Supabase into MemoryDB...")
             try:
                 rows = await asyncio.to_thread(self._fetch_target_items_sync)
-                self._target_items = {
-                    str(row["market_hash_name"]): float(row["max_buy_price"])
-                    for row in rows
-                    if row.get("market_hash_name") is not None
-                    and row.get("max_buy_price") is not None
-                }
+                loaded_items: dict[str, dict[str, float | None]] = {}
+                for row in rows:
+                    raw_name = row.get("market_hash_name")
+                    max_buy_price = self._safe_float(row.get("max_buy_price"))
+                    if raw_name is None or max_buy_price is None:
+                        continue
+                    loaded_items[str(raw_name)] = {
+                        "max_buy_price": max_buy_price,
+                        "max_float": self._safe_float(row.get("max_float")),
+                        "reference_price": self._safe_float(row.get("reference_price")),
+                    }
+                self._target_items = loaded_items
                 logger.info(
                     "Successfully loaded %d target items into MemoryDB.",
                     len(self._target_items),
@@ -80,10 +96,10 @@ class MemoryDB:
                     exc_info=True,
                 )
 
-    async def get_target_items(self) -> dict[str, float]:
-        """Return a shallow copy of the loaded target items and their reference prices."""
+    async def get_target_items(self) -> dict[str, dict[str, float | None]]:
+        """Return a copy of the loaded target items and their configuration."""
         async with self._lock:
-            return dict(self._target_items)
+            return {name: dict(cfg) for name, cfg in self._target_items.items()}
 
 
 memory_db = MemoryDB()
